@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ParkSIM | Controle de estacionamento</title>
+<style>
+:root{font-family:Inter,Arial,sans-serif;color:#172033;background:#f3f6fb}*{box-sizing:border-box}body{margin:0}.top{background:#14213d;color:white;padding:20px max(20px,calc((100% - 1180px)/2));display:flex;align-items:center;justify-content:space-between;gap:15px}.top h1{margin:0;font-size:24px}.top small{color:#c5d0e3}.online{font-size:13px;display:flex;align-items:center;gap:8px}.dot{width:9px;height:9px;border-radius:50%;background:#22c55e}.wrap{max-width:1180px;margin:22px auto;padding:0 18px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card,.panel{background:white;border:1px solid #e7ebf2;border-radius:13px;padding:17px;box-shadow:0 2px 8px #182b4b08}.label{font-size:12px;color:#68758b}.metric{font-size:27px;font-weight:750;margin-top:8px}.layout{display:grid;grid-template-columns:1fr;gap:15px;margin-top:15px}.panel h2{font-size:16px;margin:0 0 14px}.muted{font-size:12px;color:#718096}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.row{display:flex;align-items:center;gap:10px;margin-top:13px;flex-wrap:wrap}button{border:0;border-radius:8px;padding:10px 14px;background:#2457d6;color:white;font-weight:650;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}button.secondary{background:#edf1f7;color:#334155}button.green{background:#16834a}.message{margin-top:12px;padding:10px 12px;background:#f2f6ff;border-radius:8px;font-size:13px;color:#34466b}.tariffs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.field label{display:block;font-size:13px;color:#536178;margin-bottom:6px}.field input{width:100%;padding:10px;border:1px solid #d9e0ea;border-radius:8px;font-size:14px}.notice{font-size:12px;color:#68758b;margin-top:10px}.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:13px;min-width:650px}td,th{text-align:left;padding:11px 9px;border-bottom:1px solid #edf0f5;white-space:nowrap}th{color:#68758b;font-weight:600}.status{font-size:11px;padding:4px 8px;border-radius:20px;background:#eef2ff}.status.PARKED{background:#eaf2ff;color:#1d4ed8}.status.PAYMENT_PENDING{background:#fff3df;color:#9a5a00}.status.AUTHORIZED{background:#e7f8ed;color:#16723a}.status.CLOSED{background:#eef0f3;color:#586273}.modal{display:none;position:fixed;inset:0;background:#0c1837a8;z-index:5;padding:20px;align-items:center;justify-content:center}.modal.open{display:flex}.modalbox{background:#fff;border-radius:15px;width:min(100%,950px);max-height:85vh;overflow:auto;padding:20px}.modalhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.bill{font-size:13px;color:#536178;line-height:1.6}.paybtn{padding:7px 10px;font-size:12px}.empty{text-align:center;padding:24px;color:#758198}.locked{color:#a16207;font-size:12px;margin-top:10px}.footer{text-align:center;color:#8490a3;font-size:12px;margin:22px 0}@media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}.layout{grid-template-columns:1fr}.tariffs{grid-template-columns:1fr}}@media(max-width:460px){.grid{grid-template-columns:1fr 1fr}.metric{font-size:23px}.top{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<header class="top">
+    <div>
+        <h1>ParkSIM</h1>
+        <small>Controle local de estacionamento · RFID</small>
+    </div>
+    <div class="online">
+        <span class="dot"></span>
+        <span id="serverStatus">Verificando servidor...</span>
+    </div>
+</header>
+
+<main class="wrap">
+    <section class="grid">
+        <div class="card">
+            <div class="label">Veículos no estacionamento</div>
+            <div class="metric" id="activeCount">—</div>
+        </div>
+        <div class="card">
+            <div class="label">Aguardando pagamento</div>
+            <div class="metric" id="pendingCount">—</div>
+        </div>
+        <div class="card">
+            <div class="label">Saídas autorizadas</div>
+            <div class="metric" id="authorizedCount">—</div>
+        </div>
+        <div class="card">
+            <div class="label">Total recebido</div>
+            <div class="metric" id="revenue">R$ 0,00</div>
+        </div>
+    </section>
+
+    <div class="layout">
+        <section class="panel">
+            <div class="toolbar">
+                <h2>Veículos em andamento</h2>
+                <span class="muted">Leitura automática pelo RFID</span>
+            </div>
+
+            <div class="muted">
+                Aproxime o cartão no leitor. A primeira passagem registra a entrada; a próxima passagem do mesmo cartão calcula a cobrança de saída.
+            </div>
+
+            <div id="activeVehicles">
+                <div class="empty">Aguardando leitura de cartão...</div>
+            </div>
+
+            <div class="message" id="message">
+                Sistema pronto para receber cartões.
+            </div>
+        </section>
+    </div>
+
+    <section class="panel" style="margin-top:15px">
+        <div class="toolbar">
+            <h2>Configuração de tarifas</h2>
+            <span id="settingsState" class="muted"></span>
+        </div>
+
+        <div class="tariffs">
+            <div class="field">
+                <label for="fixedAmount">Valor fixo (R$)</label>
+                <input id="fixedAmount" type="number" min="0" step="0.01">
+            </div>
+
+            <div class="field">
+                <label for="variableAmount">Valor variável por intervalo (R$)</label>
+                <input id="variableAmount" type="number" min="0" step="0.01">
+            </div>
+
+            <div class="field">
+                <label for="intervalSeconds">Intervalo de cobrança (segundos)</label>
+                <input id="intervalSeconds" type="number" min="1" step="1">
+            </div>
+        </div>
+
+        <div class="row">
+            <button id="saveSettings" onclick="saveSettings()">Salvar tarifas</button>
+            <span class="muted">O variável é acrescentado a cada intervalo completo.</span>
+        </div>
+
+        <div class="locked" id="lockMessage"></div>
+    </section>
+
+    <section class="panel" style="margin-top:15px">
+        <div class="toolbar">
+            <h2>Histórico de passagens</h2>
+            <button class="secondary" onclick="openHistory()">Ver histórico completo</button>
+        </div>
+
+        <div class="tablewrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Cartão</th>
+                        <th>Entrada</th>
+                        <th>Saída</th>
+                        <th>Tempo</th>
+                        <th>Fixo</th>
+                        <th>Variável</th>
+                        <th>Total</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="recentHistory"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <p class="footer">
+        ParkSIM · Seu estacionamento mais controlado!
+    </p>
+</main>
+
+<div class="modal" id="historyModal" onclick="if(event.target===this)closeHistory()">
+    <div class="modalbox">
+        <div class="modalhead">
+            <h2>Histórico completo</h2>
+            <button class="secondary" onclick="closeHistory()">Fechar</button>
+        </div>
+
+        <div class="tablewrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Cartão</th>
+                        <th>Entrada</th>
+                        <th>Saída</th>
+                        <th>Tempo</th>
+                        <th>Fixo</th>
+                        <th>Variável</th>
+                        <th>Total</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="fullHistory"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let lastState = null;
+let historyCache = [];
+
+const brl = v => new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+}).format(Number(v || 0));
+
+const dt = v => v ? new Date(v).toLocaleString('pt-BR') : '—';
+
+function duration(sec) {
+    sec = Math.max(0, Number(sec || 0));
+
+    const d = Math.floor(sec / 86400);
+    sec %= 86400;
+
+    const h = Math.floor(sec / 3600);
+    sec %= 3600;
+
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+
+    return (d ? d + 'd ' : '') +
+        [h, m, s].map(x => String(x).padStart(2, '0')).join(':');
+}
+
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[c]));
+}
+
+async function api(url, opts = {}) {
+    const r = await fetch(url, {
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        ...opts
+    });
+
+    let data = {};
+
+    try {
+        data = await r.json();
+    } catch {}
+
+    if (!r.ok) {
+        throw new Error(data.detail || 'Falha na operação');
+    }
+
+    return data;
+}
+
+function statusLabel(s) {
+    return ({
+        PARKED: 'No estacionamento',
+        PAYMENT_PENDING: 'Pagamento pendente',
+        AUTHORIZED: 'Saída autorizada',
+        CLOSED: 'Encerrado'
+    })[s] || s;
+}
+
+function sessionRow(x, withId = false) {
+    return `
+        <tr>
+            ${withId ? `<td>${x.id}</td>` : ''}
+            <td>${esc(x.card_uid)}</td>
+            <td>${dt(x.entry_at)}</td>
+            <td>${dt(x.exit_at)}</td>
+            <td>${duration(x.elapsed_seconds)}</td>
+            <td>${brl(x.fixed_amount)}</td>
+            <td>${brl(x.variable_total)}</td>
+            <td><b>${brl(x.total)}</b></td>
+            <td>
+                <span class="status ${x.status}">
+                    ${statusLabel(x.status)}
+                </span>
+            </td>
+        </tr>
+    `;
+}
+
+function renderActive(items) {
+    if (!items.length) {
+        $('activeVehicles').innerHTML =
+            '<div class="empty">Nenhum veículo ativo. Aguardando passagem de cartão.</div>';
+        return;
+    }
+
+    $('activeVehicles').innerHTML = items.map(x => `
+        <div style="padding:13px 0;border-bottom:1px solid #edf0f5">
+            <div class="toolbar">
+                <div>
+                    <b>Cartão ${esc(x.card_uid)}</b>
+                    <span class="status ${x.status}">
+                        ${statusLabel(x.status)}
+                    </span>
+                </div>
+                <b>${brl(x.total)}</b>
+            </div>
+
+            <div class="bill">
+                Entrada: ${dt(x.entry_at)} ·
+                Tempo:
+                <b class="timer" data-entry="${esc(x.entry_at)}">
+                    ${duration(x.elapsed_seconds)}
+                </b>
+                <br>
+                Fixo: ${brl(x.fixed_amount)} ·
+                Variável: ${x.variable_increments || 0} ×
+                ${brl(x.variable_unit)} = ${brl(x.variable_total)} ·
+                Intervalo: ${x.interval_seconds}s
+            </div>
+
+            ${x.status === 'PAYMENT_PENDING' ? `
+                <div class="row">
+                    <button class="green paybtn" onclick="confirmPayment(${x.id})">
+                        Confirmar pagamento (${brl(x.total)})
+                    </button>
+                </div>
+            ` : ''}
+
+            ${x.status === 'AUTHORIZED' ? `
+                <div class="notice">
+                    Pagamento confirmado. Aproxime novamente o cartão RFID para liberar a saída.
+                </div>
+            ` : ''}
+        </div>
+    `).join('');
+}
+
+function renderHistory(items) {
+    $('recentHistory').innerHTML = items.length
+        ? items.slice(0, 8).map(x => sessionRow(x)).join('')
+        : '<tr><td colspan="8" class="empty">Ainda não existem passagens.</td></tr>';
+}
+
+function renderSettings(settings, locked) {
+    for (const [id, key] of [
+        ['fixedAmount', 'fixed_amount'],
+        ['variableAmount', 'variable_amount'],
+        ['intervalSeconds', 'interval_seconds']
+    ]) {
+        $(id).value = settings[key];
+    }
+
+    for (const id of [
+        'fixedAmount',
+        'variableAmount',
+        'intervalSeconds',
+        'saveSettings'
+    ]) {
+        $(id).disabled = locked;
+    }
+
+    $('settingsState').textContent = locked
+        ? 'Bloqueadas durante a operação'
+        : 'Disponíveis';
+
+    $('lockMessage').textContent = locked
+        ? 'As tarifas só poderão ser alteradas quando o último veículo sair e todas as passagens forem encerradas.'
+        : '';
+}
+
+async function refresh() {
+    try {
+        const s = await api('/api/state');
+
+        lastState = s;
+        historyCache = s.history || [];
+
+        $('serverStatus').textContent = 'Servidor local online';
+        $('activeCount').textContent = s.active_count;
+        $('pendingCount').textContent = s.payment_pending;
+        $('authorizedCount').textContent = s.authorized_count;
+        $('revenue').textContent = brl(s.revenue);
+
+        renderActive(s.active_vehicles);
+        renderSettings(s.settings, s.settings_locked);
+        renderHistory(historyCache);
+
+        if ($('historyModal').classList.contains('open')) {
+            renderFullHistory();
+        }
+
+    } catch (e) {
+        $('serverStatus').textContent = 'Servidor indisponível';
+    }
+}
+
+function tickTimers() {
+    document.querySelectorAll('.timer').forEach(el => {
+        const start = new Date(el.dataset.entry).getTime();
+
+        if (Number.isFinite(start)) {
+            el.textContent = duration(
+                Math.floor((Date.now() - start) / 1000)
+            );
+        }
+    });
+}
+
+async function confirmPayment(id) {
+    try {
+        const r = await api(`/api/sessions/${id}/pay`, {
+            method: 'POST'
+        });
+
+        $('message').textContent = r.message;
+        await refresh();
+
+    } catch (e) {
+        $('message').textContent = e.message;
+    }
+}
+
+async function saveSettings() {
+    try {
+        const body = {
+            fixed_amount: Number($('fixedAmount').value),
+            variable_amount: Number($('variableAmount').value),
+            interval_seconds: Number($('intervalSeconds').value)
+        };
+
+        const r = await api('/api/settings', {
+            method: 'PUT',
+            body: JSON.stringify(body)
+        });
+
+        $('message').textContent = 'Tarifas atualizadas com sucesso.';
+
+        renderSettings(r.settings, false);
+        await refresh();
+
+    } catch (e) {
+        $('message').textContent = e.message;
+        await refresh();
+    }
+}
+
+async function openHistory() {
+    $('historyModal').classList.add('open');
+
+    try {
+        historyCache = await api('/api/history?limit=1000');
+        renderFullHistory();
+
+    } catch (e) {
+        $('fullHistory').innerHTML =
+            `<tr><td colspan="9">${esc(e.message)}</td></tr>`;
+    }
+}
+
+function renderFullHistory() {
+    $('fullHistory').innerHTML = historyCache.length
+        ? historyCache.map(x => sessionRow(x, true)).join('')
+        : '<tr><td colspan="9" class="empty">Sem histórico.</td></tr>';
+}
+
+function closeHistory() {
+    $('historyModal').classList.remove('open');
+}
+
+refresh();
+setInterval(refresh, 2000);
+setInterval(tickTimers, 500);
+</script>
+</body>
+</html>

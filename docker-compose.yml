@@ -1,0 +1,95 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: parksim-api
+    environment:
+      DB_PATH: /data/parksim.db
+      RABBIT_HOST: rabbitmq
+      RABBIT_USER: ${RABBIT_USER:-parksim_app}
+      RABBIT_PASSWORD: ${RABBIT_PASSWORD:-ParkSim2026!}
+      RABBIT_VHOST: ${RABBIT_VHOST:-parksim}
+      INITIAL_FIXED_AMOUNT: ${INITIAL_FIXED_AMOUNT:-5.00}
+      INITIAL_VARIABLE_AMOUNT: ${INITIAL_VARIABLE_AMOUNT:-0.50}
+      INITIAL_INTERVAL_SECONDS: ${INITIAL_INTERVAL_SECONDS:-60}
+    ports:
+      - "8000:8000"
+    volumes:
+      - parksim_data:/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: parksim-worker
+    command: ["python", "worker.py"]
+    environment:
+      DB_PATH: /data/parksim.db
+      RABBIT_HOST: rabbitmq
+      RABBIT_USER: ${RABBIT_USER:-parksim_app}
+      RABBIT_PASSWORD: ${RABBIT_PASSWORD:-ParkSim2026!}
+      RABBIT_VHOST: ${RABBIT_VHOST:-parksim}
+    volumes:
+      - parksim_data:/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: parksim-rabbitmq
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBIT_USER:-parksim_app}
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD:-ParkSim2026!}
+      RABBITMQ_DEFAULT_VHOST: ${RABBIT_VHOST:-parksim}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbit_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  hardware:
+    build:
+      context: .
+      dockerfile: hardware/Dockerfile
+    container_name: parksim-hardware
+    network_mode: host
+    privileged: true
+    environment:
+      PARKING_API: http://127.0.0.1:8000
+      GREEN_LED_PIN: ${GREEN_LED_PIN:-31}
+      RED_LED_PIN: ${RED_LED_PIN:-29}
+      BUZZER_PIN: ${BUZZER_PIN:-33}
+      ENABLE_BUZZER: ${ENABLE_BUZZER:-1}
+      RFID_DEBOUNCE_SECONDS: ${RFID_DEBOUNCE_SECONDS:-3}
+    devices:
+      - "/dev/gpiomem:/dev/gpiomem"
+      - "/dev/spidev0.0:/dev/spidev0.0"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  parksim_data:
+  rabbit_data:
